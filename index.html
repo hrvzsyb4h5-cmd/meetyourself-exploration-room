@@ -218,6 +218,10 @@ body[data-view=home] .brand-room{color:var(--on-night-muted)}
 .answer[aria-checked=true] .radio{border-color:var(--violet)}
 .answer[aria-checked=true] .radio::after{content:'';position:absolute;inset:3.5px;border-radius:50%;background:var(--violet)}
 .answer[aria-checked=true] .key{background:var(--violet);border-color:var(--violet);color:#fff}
+.answers.is-advancing{pointer-events:none}
+.answers.is-advancing .answer:not([aria-checked=true]){opacity:.38;transform:scale(.992)}
+.answer.answer-picked{animation:answerPick .28s var(--ease) both}
+@keyframes answerPick{0%{transform:scale(1)}45%{transform:scale(.975)}100%{transform:scale(1.008)}}
 .q-nav{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:26px}
 .next-btn{min-width:168px}
 .hint{text-align:center;font-size:12px;color:var(--muted);margin:20px 0 0}
@@ -685,22 +689,26 @@ function question(){
  +(q.kind==='pair'?'<div class="scenarios"><div class="scenario"><span class="letter">A</span><p>'+escape(q.a)+'</p></div><div class="scenario"><span class="letter">B</span><p>'+escape(q.b)+'</p></div></div>':'')
  +'<div class="answers" role="radiogroup" aria-labelledby="question-heading">'+options.map((text,i)=>'<button class="answer" role="radio" aria-checked="'+(a===i)+'" data-answer="'+i+'" tabindex="'+(a===i||a===undefined&&i===0?0:-1)+'"><span class="radio" aria-hidden="true"></span><span class="answer-text">'+escape(text)+'</span><kbd class="key" aria-hidden="true">'+(i+1)+'</kbd></button>').join('')+'</div>'
  +'<div class="q-nav"><button class="ghost" data-action="prev" '+(state.pos===0?'disabled':'')+'>← 上一题</button><button class="primary next-btn" data-action="next" '+(a===undefined?'disabled':'')+'>'+(state.pos===60?'查看结果':'下一题 →')+'</button></div>'
- +'<p class="hint"><kbd>1</kbd>–<kbd>'+options.length+'</kbd> 快速选择 · 方向键移动 · <kbd>Enter</kbd> 下一题</p>'
+ +'<p class="hint">点一下选项即可进入下一题 · 键盘 <kbd>1</kbd>–<kbd>'+options.length+'</kbd> 选择 · <kbd>Enter</kbd> 下一题</p>'
  +'<div class="saved">进度自动保存在当前浏览器</div></section>';
- app.querySelector('[data-action=progress]').onclick=showProgress;
- app.querySelector('[data-action=home]').onclick=()=>setView('home');
- app.querySelector('[data-action=prev]').onclick=()=>{if(state.pos>0){state.pos--;navDir='prev';persist();render();}};
+ let advanceTimer=null,advancing=false;
+ const clearAuto=()=>{if(advanceTimer){clearTimeout(advanceTimer);advanceTimer=null;}advancing=false;};
+ app.querySelector('[data-action=progress]').onclick=()=>{clearAuto();showProgress();};
+ app.querySelector('[data-action=home]').onclick=()=>{clearAuto();setView('home');};
+ app.querySelector('[data-action=prev]').onclick=()=>{clearAuto();if(state.pos>0){state.pos--;navDir='prev';persist();render();}};
  const choose=(i,focus)=>{const isNew=state.answers[q.id]===undefined;if(q.id<=48&&state.answers[q.id]!==i)state.clarifications={};state.answers[q.id]=i;persist();app.querySelectorAll('[data-answer]').forEach(b=>{const on=+b.dataset.answer===i;b.setAttribute('aria-checked',on);b.tabIndex=on?0:-1;if(on&&focus)b.focus();});app.querySelector('[data-action=next]').disabled=false;
  if(isNew){const answered=Object.keys(state.answers).length;const track=app.querySelector('.track');const fill=track?.querySelector('i');if(track)track.setAttribute('aria-valuenow',String(answered));if(fill)fill.style.width=(answered/61*100)+'%';}};
- app.querySelectorAll('[data-answer]').forEach(b=>{b.onclick=()=>choose(+b.dataset.answer,false);b.onkeydown=e=>{const n=+b.dataset.answer;if(['ArrowDown','ArrowRight','ArrowUp','ArrowLeft','Home','End'].includes(e.key)){e.preventDefault();choose(e.key==='Home'?0:e.key==='End'?options.length-1:(n+(['ArrowUp','ArrowLeft'].includes(e.key)?-1:1)+options.length)%options.length,true);}};});
+ const answersEl=app.querySelector('.answers');
+ const scheduleAdvance=btn=>{clearAuto();advancing=true;answersEl.classList.add('is-advancing');if(btn)btn.classList.add('answer-picked');advanceTimer=setTimeout(()=>{advanceTimer=null;advance();},280);};
+ app.querySelectorAll('[data-answer]').forEach(b=>{b.onclick=()=>{if(advancing)return;choose(+b.dataset.answer,false);scheduleAdvance(b);};b.onkeydown=e=>{const n=+b.dataset.answer;if(['ArrowDown','ArrowRight','ArrowUp','ArrowLeft','Home','End'].includes(e.key)){e.preventDefault();choose(e.key==='Home'?0:e.key==='End'?options.length-1:(n+(['ArrowUp','ArrowLeft'].includes(e.key)?-1:1)+options.length)%options.length,true);}};});
  const advance=()=>{if(state.answers[q.id]===undefined)return;if(state.pos===60){if(order.some(id=>state.answers[id]===undefined)){showProgress();return;}setView('result');}else{state.pos++;navDir='next';persist();question();window.scrollTo({top:0,behavior:'instant'});app.querySelector('#question-heading').focus({preventScroll:true});}};
- app.querySelector('[data-action=next]').onclick=advance;
+ app.querySelector('[data-action=next]').onclick=()=>{clearAuto();advance();};
  keyHandler=e=>{
   if(e.metaKey||e.ctrlKey||e.altKey)return;
   const tag=(e.target.tagName||'');if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
   const n=parseInt(e.key,10);
-  if(!Number.isNaN(n)&&n>=1&&n<=options.length){e.preventDefault();choose(n-1,false);return;}
-  if(e.key==='Enter'){const btn=app.querySelector('[data-action=next]');if(btn&&!btn.disabled){e.preventDefault();advance();}}
+  if(!Number.isNaN(n)&&n>=1&&n<=options.length){e.preventDefault();if(advancing)return;choose(n-1,false);scheduleAdvance(app.querySelector('[data-answer="'+(n-1)+'"]'));return;}
+  if(e.key==='Enter'){if(advancing)return;const btn=app.querySelector('[data-action=next]');if(btn&&!btn.disabled){e.preventDefault();advance();}}
  };
 }
 document.addEventListener('keydown',e=>{if(keyHandler)keyHandler(e);});
